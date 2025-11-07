@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>%Ef desde Google Sheet (Chart.js)</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body{margin:0; font-family:'Inter',system-ui,Segoe UI,Roboto,Arial,sans-serif; background:#f6f9fb;}
+  .wrap{max-width:1000px; margin:24px auto; padding:0 16px;}
+  h1{font-weight:800; margin:8px 0 18px}
+  .panel{background:#fff; border:1px solid #e8eef3; border-radius:14px; padding:16px; box-shadow:0 8px 20px rgba(2,18,31,.1)}
+  #chart{width:100%; height:400px}
+  .note{color:#6b7280; font-size:13px; margin-top:8px}
+  .warn{color:#b45309; font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>%Ef (desde Google Sheet)</h1>
+  <div class="panel">
+    <canvas id="chart"></canvas>
+    <div class="note">
+      Fuente: Hoja <b>db</b> → columnas A (Item) y B (%Ef).
+      <span id="debug" class="warn"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  // Tu Sheet
+  const SHEET_ID = '1-UswugaqnY8HW_NSTbYe39dMB77q_ke25FzlqCGml2k';
+  const HOJA     = 'db';
+  const TQ       = "select A,B where A is not null";  // A=Item, B=%Ef
+  const CSV_URL  =
+    `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(HOJA)}&tq=${encodeURIComponent(TQ)}`;
+
+  // Enlace para probar acceso a datos
+  document.getElementById('debug').innerHTML = ` — <a href="${CSV_URL}" target="_blank" rel="noopener">probar CSV</a>`;
+
+  // Utilidad: convierte "44%" o "44,5" o "0.44" a 0.44
+  function toRatio(v){
+    if (v == null) return null;
+    let s = String(v).trim();
+    if (s === '') return null;
+    s = s.replace('%','').replace(',','.');
+    let num = parseFloat(s);
+    if (isNaN(num)) return null;
+    if (num > 1) num = num/100;
+    return num;
+  }
+
+  async function main(){
+    try{
+      const res = await fetch(CSV_URL);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const csv = await res.text();
+
+      // Parse CSV muy simple (A,B con cabecera)
+      const lines = csv.trim().split(/\r?\n/);
+      // quitar cabecera
+      const rows = lines.slice(1).map(l => l.split(/,(.+)/)); // separa solo en la primera coma
+      const labels = [];
+      const values = [];
+      rows.forEach(r => {
+        const item = (r[0]||'').trim();
+        const val  = toRatio((r[1]||'').trim());
+        if(item && val!=null){
+          labels.push(item);
+          values.push(val);
+        }
+      });
+
+      if(labels.length === 0){
+        document.querySelector('#chart').replaceWith('No hay filas válidas para graficar.');
+        return;
+      }
+
+      const ctx = document.getElementById('chart').getContext('2d');
+      // Gráfico
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: '%Ef',
+            data: values,
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive:true,
+          maintainAspectRatio:false,
+          scales:{
+            y:{
+              beginAtZero:true,
+              suggestedMax:1,
+              ticks:{
+                // muestra 0%..100%
+                callback:(v)=> new Intl.NumberFormat('es-PE',{style:'percent',maximumFractionDigits:0}).format(v)
+              },
+              grid:{ color:'#eef3f6' }
+            },
+            x:{ ticks:{ maxRotation:45, minRotation:0 } }
+          },
+          plugins:{
+            legend:{ display:false },
+            tooltip:{
+              callbacks:{
+                label:(ctx)=> ` ${new Intl.NumberFormat('es-PE',{style:'percent',maximumFractionDigits:0}).format(ctx.parsed.y)}`
+              }
+            }
+          },
+          animation:{ duration:600 }
+        }
+      });
+    }catch(err){
+      console.error(err);
+      document.querySelector('#chart').replaceWith('No se pudo leer el Sheet (revisa permisos y conexión).');
+    }
+  }
+  main();
+</script>
+</body>
+</html>
